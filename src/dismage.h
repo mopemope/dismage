@@ -34,7 +34,6 @@
 #define SERVER "5.0"
 #define MODULE_NAME "_dismage"
 
-extern drizzle_st *drizzle;
 
 typedef enum{
     STATE_OK,

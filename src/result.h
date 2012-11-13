@@ -5,6 +5,9 @@
 
 typedef struct {
     PyObject_HEAD
+    PyObject *catalog;
+    PyObject *db;
+    PyObject *table;
     PyObject *columns;
     PyObject *rows;
 } ResultObject;
