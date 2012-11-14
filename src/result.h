@@ -2,6 +2,7 @@
 #define RESULT_H
 
 #include "dismage.h"
+#include "client.h"
 
 typedef struct {
     PyObject_HEAD
@@ -14,6 +15,8 @@ typedef struct {
 
 extern PyTypeObject ResultObjectType;
 
-PyObject* create_start_result(PyObject *clientObj);
+PyObject* create_start_result(void);
+
+PyObject* write_result(ClientObject *clientObj);
 
 #endif

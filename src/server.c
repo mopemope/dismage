@@ -419,7 +419,7 @@ handshake_client(ClientObject *clientObj)
 static PyObject* 
 read_command(ClientObject *clientObj)
 {
-    PyObject *o;
+    PyObject *o, *start_result = NULL;
     drizzle_con_st *con;
     client_t *client;
     drizzle_return_t ret;
@@ -431,6 +431,12 @@ read_command(ClientObject *clientObj)
     client = clientObj->client;
     con = client->con;
 
+    start_result = create_start_result();
+
+    if (start_result == NULL) {
+        return NULL;
+    }
+    
     while (1) {
         data = (uint8_t *)drizzle_con_command_read(con, &command, &offset, &size, &total, &ret);
         DEBUG("command read ret:%d", ret);
@@ -460,14 +466,16 @@ read_command(ClientObject *clientObj)
         }
     }
     DEBUG("offset:%d size:%d total:%d", (int)offset, (int)size, (int)total);
-    o = Py_BuildValue("(is#)", (int)command, data, size);
+    o = Py_BuildValue("(is#O)", (int)command, data, size, start_result);
     /* free(data); */
-
+    if (o == NULL) {
+        Py_XDECREF(start_result);
+    }
     return o;
 }
 
 
-
+/*
 static PyObject* 
 write_result(ClientObject *clientObj, PyObject *o)
 {
@@ -504,6 +512,7 @@ write_result(ClientObject *clientObj, PyObject *o)
     }
     Py_RETURN_NONE;
 }
+*/
 
 static PyObject*
 disage_handler(PyObject *self, PyObject *o)
@@ -535,7 +544,8 @@ disage_handler(PyObject *self, PyObject *o)
             //ERROR
             Py_RETURN_NONE;
         }
-        result_res = write_result(clientObj, res);
+        clientObj->result = res;
+        result_res = write_result(clientObj);
         Py_XDECREF(result_res);
         Py_XDECREF(res);
     }

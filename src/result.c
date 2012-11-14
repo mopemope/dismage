@@ -2,7 +2,7 @@
 #include "server.h"
 #include "client.h"
 
-PyObject* create_start_result(PyObject *clientObj)
+PyObject* create_start_result()
 {
     ResultObject *result;
 
@@ -192,6 +192,71 @@ error:
     return STATE_ERROR;
 }
 
+static io_state 
+return_result(client_t *client)
+{
+    drizzle_result_st *result = NULL;
+    drizzle_con_st *con = NULL;
+    drizzle_return_t ret = DRIZZLE_RETURN_OK;
+
+    con = client->con;
+    result = client->result;
+
+    ret = drizzle_result_write(con, result, true);
+    if (ret == DRIZZLE_RETURN_IO_WAIT) {
+        return STATE_IO_WAIT;
+    } else if (ret == DRIZZLE_RETURN_OK) {
+        drizzle_result_free(client->result);
+        client->result = NULL;
+        client->state = CALL_HANDLER;
+        return STATE_OK;
+    } else {
+        //ERROR
+        RDEBUG("ret %d:%s", ret, drizzle_error(drizzle_con_drizzle(client->con)));
+        drizzle_result_free(client->result);
+        client->result = NULL;
+        return STATE_ERROR;
+    }
+}
+
+PyObject* 
+write_result(ClientObject *clientObj)
+{
+    drizzle_result_st *result = NULL;
+    drizzle_con_st *con = NULL;
+    drizzle_return_t ret = DRIZZLE_RETURN_OK;
+    io_state state = STATE_ERROR;
+    PyObject *resObj;
+
+    client_t *client = clientObj->client;
+    con = client->con;
+    
+    result = drizzle_result_create(con, NULL);
+    if (result == NULL) {
+        RDEBUG("ret %d:%s", ret, drizzle_error(drizzle_con_drizzle(client->con)));
+        return NULL;
+    }
+
+    client->result = result;
+    resObj = clientObj->result;
+
+    while (1) {
+        if (Py_None == resObj) {
+            DEBUG("return None");
+            state = return_result(client);
+        } else {
+            state = return_result(client);
+        }
+        state = check_state(clientObj, state);
+        BDEBUG("handshake_return_result state:%d", state);
+        if (state == STATE_OK) {
+            break;
+        } else if (state == STATE_ERROR) {
+            return NULL;
+        }
+    }
+    Py_RETURN_NONE;
+}
 
 static PyMethodDef ResultObject_methods[] = {
     {NULL, NULL} /* sentinel */
