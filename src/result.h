@@ -10,7 +10,7 @@ typedef struct {
     PyObject *db;
     PyObject *table;
     PyObject *columns;
-    PyObject *rows;
+    // PyObject *rows;
 } ResultObject;
 
 extern PyTypeObject ResultObjectType;

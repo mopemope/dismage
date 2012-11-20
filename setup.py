@@ -56,7 +56,7 @@ sources = get_sources("src", ["*picoev*"])
 sources.append(get_picoev_file())
 
 library_dirs=[]
-include_dirs=["/usr/include/libdrizzle-1.0"]
+include_dirs=["/usr/include/libdrizzle-1.0", "/usr/include/libdrizzle-1.0/libdrizzle"]
 
 if develop:
     define_macros.append(("DEVELOP",None))

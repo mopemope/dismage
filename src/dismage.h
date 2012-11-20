@@ -29,7 +29,7 @@
 #include <time.h>
 #include <sys/time.h>
 
-#include <libdrizzle/drizzle_server.h>
+#include <drizzle_server.h>
 
 #define SERVER "5.0"
 #define MODULE_NAME "_dismage"

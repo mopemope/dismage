@@ -15,7 +15,7 @@ PyObject* create_start_result()
     GDEBUG("alloc ResultObject:%p", result);
 
     result->columns = NULL;
-    result->rows = NULL;
+    /* result->rows = NULL; */
     
 
     return (PyObject*)result;
@@ -27,6 +27,10 @@ ResultObject_dealloc(ResultObject *self)
 {
     GDEBUG("dealloc ResultObject:%p", self);
 
+    Py_CLEAR(self->columns);
+    Py_XDECREF(self->catalog);
+    Py_XDECREF(self->db);
+    Py_XDECREF(self->table);
     PyObject_DEL(self);
     
 }
@@ -59,7 +63,17 @@ ResultObject_call(PyObject *o, PyObject *args, PyObject *kwargs)
         return NULL;
     }
     
+    Py_INCREF(columns);
     self->columns = columns;
+
+    Py_XINCREF(catalog);
+    self->catalog = catalog;
+
+    Py_XINCREF(db);
+    self->db = db;
+
+    Py_XINCREF(table);
+    self->table = table;
 
     Py_RETURN_NONE;
 }
