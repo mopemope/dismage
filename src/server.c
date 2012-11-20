@@ -468,9 +468,10 @@ read_command(ClientObject *clientObj)
     DEBUG("offset:%d size:%d total:%d", (int)offset, (int)size, (int)total);
     o = Py_BuildValue("(is#O)", (int)command, data, size, start_result);
     /* free(data); */
-    if (o == NULL) {
-        Py_XDECREF(start_result);
-    }
+    clientObj->start_result = start_result;
+    /* if (o == NULL) { */
+        /* Py_XDECREF(start_result); */
+    /* } */
     return o;
 }
 
@@ -544,8 +545,7 @@ disage_handler(PyObject *self, PyObject *o)
             //ERROR
             Py_RETURN_NONE;
         }
-        clientObj->result = res;
-        result_res = write_result(clientObj);
+        result_res = write_result(clientObj, res);
         Py_XDECREF(result_res);
         Py_XDECREF(res);
     }

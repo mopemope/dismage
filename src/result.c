@@ -234,13 +234,12 @@ return_result(client_t *client)
 }
 
 PyObject* 
-write_result(ClientObject *clientObj)
+write_result(ClientObject *clientObj, PyObject *resObj)
 {
     drizzle_result_st *result = NULL;
     drizzle_con_st *con = NULL;
     drizzle_return_t ret = DRIZZLE_RETURN_OK;
     io_state state = STATE_ERROR;
-    PyObject *resObj;
 
     client_t *client = clientObj->client;
     con = client->con;
@@ -252,7 +251,6 @@ write_result(ClientObject *clientObj)
     }
 
     client->result = result;
-    resObj = clientObj->result;
 
     while (1) {
         if (Py_None == resObj) {

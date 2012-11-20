@@ -17,6 +17,6 @@ extern PyTypeObject ResultObjectType;
 
 PyObject* create_start_result(void);
 
-PyObject* write_result(ClientObject *clientObj);
+PyObject* write_result(ClientObject *clientObj, PyObject *resObj);
 
 #endif

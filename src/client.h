@@ -23,7 +23,7 @@ typedef struct {
     PyObject_HEAD
     client_t *client;
     PyObject *greenlet;
-    PyObject *result;
+    PyObject *start_result;
 } ClientObject;
 
 extern PyTypeObject ClientObjectType;
