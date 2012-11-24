@@ -283,7 +283,6 @@ return_result(client_t *client)
     } else if (ret == DRIZZLE_RETURN_OK) {
         drizzle_result_free(client->result);
         client->result = NULL;
-        client->state = CALL_HANDLER;
         return STATE_OK;
     } else {
         //ERROR
@@ -328,7 +327,6 @@ handshake_client_read(client_t *client)
     if (ret == DRIZZLE_RETURN_IO_WAIT) {
         return STATE_IO_WAIT;
     } else if (ret == DRIZZLE_RETURN_OK) {
-        client->state = CALL_HANDLER;
         return STATE_OK;
     } else {
         //ERROR
@@ -344,7 +342,6 @@ handshake_server_write(client_t *client)
     drizzle_con_st *con = NULL;
     drizzle_return_t ret;
     
-    client->state = HANDSHAKE_WRITE;
     con = client->con;
     drizzle_con_set_protocol_version(con, 10);
     drizzle_con_set_server_version(con, SERVER);
@@ -361,7 +358,6 @@ handshake_server_write(client_t *client)
     if (ret == DRIZZLE_RETURN_IO_WAIT) {
         return STATE_IO_WAIT;
     } else if (ret == DRIZZLE_RETURN_OK) {
-        client->state = HANDSHAKE_READ;
         return STATE_OK;
     } else {
         //ERROR

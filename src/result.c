@@ -78,17 +78,16 @@ ResultObject_call(PyObject *o, PyObject *args, PyObject *kwargs)
     Py_RETURN_NONE;
 }
 
-
 static io_state
-send_result_data_internal(client_t *client, bool buffer)
+check_return_type(ClientObject *clientObj, drizzle_return_t ret)
 {
-    drizzle_return_t ret;
+    io_state state = STATE_ERROR;
+    client_t *client = clientObj->client;
 
-    ret = drizzle_result_write(client->con, client->result, buffer);
-    if (ret == DRIZZLE_RETURN_IO_WAIT) {
-        return STATE_IO_WAIT;
-    } else if (ret == DRIZZLE_RETURN_OK) {
+    if (ret == DRIZZLE_RETURN_OK) {
         return STATE_OK;
+    } else if (ret == DRIZZLE_RETURN_IO_WAIT) {
+        state = STATE_IO_WAIT;
     } else {
         //ERROR
         RDEBUG("ret %d:%s", ret, drizzle_error(drizzle_con_drizzle(client->con)));
@@ -96,20 +95,27 @@ send_result_data_internal(client_t *client, bool buffer)
         client->result = NULL;
         return STATE_ERROR;
     }
+    state = check_state(clientObj, state);
+    return state;
+}
+
+static io_state
+send_result_data_internal(ClientObject *clientObj, bool buffer)
+{
+    drizzle_return_t ret;
+
+    client_t *client = clientObj->client;
+    ret = drizzle_result_write(client->con, client->result, buffer);
+    return check_return_type(clientObj, ret);
 }
 
 static io_state
 send_result_data(ClientObject *clientObj, bool buffer)
 {
     io_state state = STATE_ERROR;
-    client_t *client = clientObj->client;
     while (1) {
-        state = send_result_data_internal(client, buffer);
-        state = check_state(clientObj, state);
-        BDEBUG("send_result_data state:%d", state);
-        if (state == STATE_OK) {
-            break;
-        } else if (state == STATE_ERROR) {
+        state = send_result_data_internal(clientObj, buffer);
+        if (state != STATE_IO_WAIT) {
             return state;
         }
     }
@@ -176,18 +182,31 @@ set_columns_info(ClientObject *clientObj, drizzle_column_st *column, PyObject *i
     size = PyTuple_GET_ITEM(item, 1);
     name = PyTuple_GET_ITEM(item, 2);
     
+    DEBUG("type:%p size:%p name:%p", type, size, name);
+
     // Check type
+#ifdef PY3
     if (type == NULL || !PyLong_Check(type)) {
+#else
+    if (type == NULL || !PyInt_Check(type)) {
+#endif
+        RDEBUG("error type");
         return STATE_ERROR;
     }
 
     // Check size
+#ifdef PY3
     if (size == NULL || !PyLong_Check(size)) {
+#else
+    if (size == NULL || !PyInt_Check(size)) {
+#endif
+        RDEBUG("error size");
         return STATE_ERROR;
     }
     
     //
     if (name == NULL || !PyBytes_Check(name)) {
+        RDEBUG("error name");
         return STATE_ERROR;
     }
     
@@ -199,19 +218,12 @@ set_columns_info(ClientObject *clientObj, drizzle_column_st *column, PyObject *i
     drizzle_column_set_size(column, dsize);
     drizzle_column_set_name(column, dname);
     drizzle_column_set_orig_name(column, dname);
+    
+    DEBUG("column set type:%d, size:%d name:%s", (int)dtype, (int)dsize, dname);
 
     while (1) {
         ret = drizzle_column_write(client->result, column);
-        if (ret == DRIZZLE_RETURN_IO_WAIT) {
-            state = STATE_IO_WAIT;
-        } else if (ret == DRIZZLE_RETURN_OK) {
-            state = STATE_OK;
-        } else {
-            //ERROR
-            RDEBUG("ret %d:%s", ret, drizzle_error(drizzle_con_drizzle(client->con)));
-            return state;
-        }
-        state = check_state(clientObj, state);
+        state = check_return_type(clientObj, ret);
         BDEBUG("column write state:%d", state);
         if (state != STATE_IO_WAIT) {
             return state;
@@ -250,20 +262,20 @@ write_columns_info(ClientObject *clientObj)
                          item->ob_type->tp_name);
             goto error;
         }
-        if (unlikely(PyTuple_GET_SIZE(item) != 2)) {
-            PyErr_Format(PyExc_ValueError, "tuple of length 2 " "expected, length is %d",
+        if (unlikely(PyTuple_GET_SIZE(item) != 3)) {
+            PyErr_Format(PyExc_ValueError, "tuple of length 3 " "expected, length is %d",
                          (int)PyTuple_Size(item));
             goto error;
         }
         state = set_columns_info(clientObj, &column, item);
         Py_DECREF(item);
         if (state == STATE_ERROR) {
+            RDEBUG("error");
             item = NULL;
             goto error;
         }
         
     }
-    /* drizzle_column_free(&column); */
 
     drizzle_result_set_eof(client->result, true);
     state = send_result_data(clientObj, false);
@@ -273,6 +285,7 @@ write_columns_info(ClientObject *clientObj)
     return state;
 
 error:
+
     Py_XDECREF(item);
     Py_XDECREF(iterator);
     drizzle_result_free(client->result);
@@ -281,11 +294,141 @@ error:
 }
 
 static io_state
+write_row_internal(ClientObject *clientObj, PyObject *rowObj, uint32_t count)
+{
+    io_state state = STATE_ERROR;
+    drizzle_return_t ret;
+    PyObject *strObjs[count];
+    Py_ssize_t sizes[count];
+    char *fields[count];
+    uint32_t x = 0;
+    PyObject *strObj, *iterator = NULL, *item = NULL;
+    client_t *client = clientObj->client;
+
+    iterator = PyObject_GetIter(rowObj);
+    if (PyErr_Occurred()){
+        goto error; 
+    }
+  
+    while ((item =  PyIter_Next(iterator))) {
+        if (PyBytes_Check(item)) {
+           Py_INCREF(item); 
+           strObj = item;
+        } else {
+            strObj = PyObject_Bytes(item);
+            if (strObj == NULL) {
+                goto error;
+            }
+        }
+        PyString_AsStringAndSize(strObj, (char**)&fields[x], &sizes[x]);
+        DEBUG("field:%s size:%d", fields[x], (int)sizes[x]);
+
+        Py_XDECREF(item);
+        strObjs[x] = strObj;
+        x++;
+    }
+    
+    drizzle_result_calc_row_size(client->result, (drizzle_field_t *)fields, (size_t*)sizes);
+
+    while (1) {
+        ret = drizzle_row_write(client->result);
+        state = check_return_type(clientObj, ret);
+        BDEBUG("drizzle_row_write:%d", state);
+        if (state == STATE_ERROR) {
+             goto error;
+        } else if(state == STATE_OK) {
+            break;
+        }
+    }
+
+
+    for (x = 0; x < count; x++) {
+        while (1) {
+            ret = drizzle_field_write(client->result, (drizzle_field_t)fields[x], (size_t)sizes[x], (size_t)sizes[x]);
+            state = check_return_type(clientObj, ret);
+            BDEBUG("drizzle_row_write:%d", state);
+            if (state == STATE_ERROR) {
+                 goto error;
+            } else if(state == STATE_OK) {
+                break;
+            }
+        }
+    }
+
+    for (x = 0; x < count; x++) {
+        Py_XDECREF(strObjs[x]);
+    }
+    return STATE_OK;
+
+error:
+    Py_XDECREF(item);
+    Py_XDECREF(iterator);
+    for (x = 0; x < count; x++) {
+        Py_XDECREF(strObjs[x]);
+    }
+
+    return STATE_ERROR;
+}
+
+static io_state
+write_last_data(ClientObject *clientObj)
+{
+    drizzle_return_t ret;
+    client_t *client = clientObj->client;
+    io_state state = STATE_ERROR;
+
+    drizzle_result_set_eof(client->result, true);
+    ret = drizzle_result_write(client->con, client->result, true);
+    state = check_return_type(clientObj, ret);
+   
+    if (client->result != NULL) {
+        drizzle_result_free(client->result);
+        client->result = NULL;
+    }
+    return state;
+}
+
+static io_state
 write_rows(ClientObject *clientObj, PyObject *resObj, uint32_t count)
 {
     io_state state = STATE_ERROR;
+    PyObject *iterator = NULL, *item = NULL;
 
-    return state;
+    iterator = PyObject_GetIter(resObj);
+    if (PyErr_Occurred()){
+        goto error; 
+    }
+    
+    while ((item = PyIter_Next(iterator))) {
+
+        if (unlikely(!PyTuple_Check(item))) {
+            PyErr_Format(PyExc_TypeError, "list of tuple values " "expected, value of type %.200s found",
+                         item->ob_type->tp_name);
+            goto error;
+        }
+        
+        if (unlikely(PyTuple_GET_SIZE(item) != count)) {
+            PyErr_Format(PyExc_ValueError, "tuple of length %d " "expected, length is %d",
+                         count, (int)PyTuple_Size(item));
+            goto error;
+        }
+        
+        state = write_row_internal(clientObj, item, count);
+        if (state == STATE_ERROR) {
+            goto error;
+        }
+        Py_DECREF(item);
+    }
+
+    Py_DECREF(iterator);
+
+    return write_last_data(clientObj);
+
+error:
+    Py_XDECREF(item);
+    Py_XDECREF(iterator);
+
+    return STATE_ERROR;
 }
 
 static PyObject*
@@ -306,24 +449,26 @@ return_row_result(ClientObject *clientObj, PyObject *resObj)
     io_state state = STATE_ERROR;
     PyObject *columns = NULL;
     int count = 0;
-
+    
     ResultObject *start_result = (ResultObject*)clientObj->start_result;
     columns = start_result->columns;
     count = PyList_GET_SIZE(columns);
 
     state = write_columns_count(clientObj, count);
-    DEBUG("write_columns_count clientObj:%p count:%d", clientObj, count);
+    DEBUG("write_columns_count clientObj:%p count:%d state:%d", clientObj, count, (int)state);
     if (state == STATE_ERROR) {
         return NULL;
     }
+
     state = write_columns_info(clientObj);
-    DEBUG("write_columns_info clientObj:%p resObj:%p", clientObj, resObj);
+    DEBUG("write_columns_info clientObj:%p resObj:%p state:%d", clientObj, resObj, (int)state);
     if (state == STATE_ERROR) {
         return NULL;
     }
 
     // rows
     state = write_rows(clientObj, resObj, count);
+    DEBUG("write_row clientObj:%p resObj:%p", clientObj, resObj);
     if (state == STATE_ERROR) {
         return NULL;
     }
