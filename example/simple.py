@@ -11,7 +11,6 @@ def r(cmd, cmd_data, start_result):
     start_result(columns=columns)
     return [('john', 30), ('smith', 28)]
 
-print(dir())
 listen(port=3307)
 run(r)
 

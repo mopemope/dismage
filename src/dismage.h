@@ -31,7 +31,7 @@
 
 #include <drizzle_server.h>
 
-#define SERVER "5.0"
+#define SERVER "dismage"
 #define MODULE_NAME "_dismage"
 
 
