@@ -68,6 +68,7 @@ static int
 ClientObject_clear(ClientObject *self)
 {
     GDEBUG("self:%p", self);
+    Py_XDECREF(self->start_result);
     Py_CLEAR(self->greenlet);
     return 0;
 }
