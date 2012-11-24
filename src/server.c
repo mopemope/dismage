@@ -544,6 +544,7 @@ disage_handler(PyObject *self, PyObject *o)
         result_res = write_result(clientObj, res);
         Py_XDECREF(result_res);
         Py_XDECREF(res);
+        Py_XDECREF(clientObj->start_result);
     }
 
     Py_RETURN_NONE;
@@ -585,7 +586,7 @@ call_disage_handler(drizzle_con_st *con)
         Py_DECREF(args);
         return;
     }
-    /* Py_DECREF(greenlet_getparent(greenlet)); */
+    Py_DECREF(greenlet_getparent(greenlet));
     clientObj->greenlet = greenlet;
 
     DEBUG("start client:%p", clientObj);

@@ -15,6 +15,9 @@ PyObject* create_start_result()
     GDEBUG("alloc ResultObject:%p", result);
 
     result->columns = NULL;
+    result->catalog = NULL;
+    result->db = NULL;
+    result->table = NULL;
     /* result->rows = NULL; */
     
 
@@ -27,7 +30,7 @@ ResultObject_dealloc(ResultObject *self)
 {
     GDEBUG("dealloc ResultObject:%p", self);
 
-    Py_CLEAR(self->columns);
+    Py_XDECREF(self->columns);
     Py_XDECREF(self->catalog);
     Py_XDECREF(self->db);
     Py_XDECREF(self->table);

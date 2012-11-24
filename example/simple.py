@@ -7,7 +7,7 @@ def r(cmd, cmd_data, start_result):
         return
     #column = (type, size, name)
     columns = [(COLUMN_TYPE_VARCHAR, 10, 'name'), (COLUMN_TYPE_INT24, 8, 'age')]
-    print(columns)
+    # print(columns)
     start_result(columns=columns)
     return [('john', 30), ('smith', 28)]
 

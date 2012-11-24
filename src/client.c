@@ -58,6 +58,9 @@ ClientObject_new(drizzle_con_st *con)
         return NULL;
     }
 
+    clientObj->greenlet = NULL;
+    clientObj->start_result = NULL;
+
     clientObj->client = client;
     PyObject_GC_Track(clientObj);
     GDEBUG("alloc ClientObject%p", clientObj);
