@@ -15,7 +15,18 @@ def app(cmd, cmd_data, start_result):
     start_result(columns=columns)
     return [('john', 30), ('smith', 28)]
 
+def kill_all(sig, st):
+    for w in workers:
+        w.terminate()
+
+def start(num=4):
+    for i in range(num):
+        p = Process(name="worker-%d" % i, target=run, args=(app,))
+        workers.append(p)
+        p.start()
+
+signal.signal(signal.SIGTERM, kill_all)
 listen(port=3307)
-run(app)
+start()
 
 
