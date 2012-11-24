@@ -330,6 +330,7 @@ write_row_internal(ClientObject *clientObj, PyObject *rowObj, uint32_t count)
         strObjs[x] = strObj;
         x++;
     }
+    Py_DECREF(iterator);
     
     drizzle_result_calc_row_size(client->result, (drizzle_field_t *)fields, (size_t*)sizes);
 
@@ -425,7 +426,7 @@ write_rows(ClientObject *clientObj, PyObject *resObj, uint32_t count)
 
     Py_DECREF(iterator);
 
-    return write_last_data(clientObj);
+    return state;
 
 error:
     Py_XDECREF(item);
@@ -468,10 +469,15 @@ return_row_result(ClientObject *clientObj, PyObject *resObj)
     if (state == STATE_ERROR) {
         return NULL;
     }
-
+    
     // rows
     state = write_rows(clientObj, resObj, count);
     DEBUG("write_row clientObj:%p resObj:%p", clientObj, resObj);
+    if (state == STATE_ERROR) {
+        return NULL;
+    }
+
+    state = write_last_data(clientObj);
     if (state == STATE_ERROR) {
         return NULL;
     }
