@@ -21,6 +21,7 @@ new_client_t(drizzle_con_st *con)
 
     client->con = con;
     client->client_fd = fd;
+    client->result = NULL;
     
     GDEBUG("alloc client_t:%p", client);
     return client;

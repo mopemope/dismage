@@ -95,8 +95,8 @@ init_drizzle(void)
 {
     drizzle = drizzle_create(NULL);
     if (drizzle == NULL) {
-        PyErr_SetString(PyExc_IOError, "drizzle_st create failed");
         RDEBUG("drizzle_st create failed");
+        PyErr_SetString(database_error, "drizzle_st create failed");
         return -1;
     }
     drizzle_add_options(drizzle, DRIZZLE_NON_BLOCKING);
@@ -104,72 +104,72 @@ init_drizzle(void)
 }
 
 
-int
-io_wait(drizzle_con_st *con, drizzle_return_t ret)
-{
-    drizzle_return_t dret;
-    int fd = 0, events = 0;
-    PyObject *fileno, *state, *args, *res;
+/* int */
+/* io_wait(drizzle_con_st *con, drizzle_return_t ret) */
+/* { */
+    /* drizzle_return_t dret; */
+    /* int fd = 0, events = 0; */
+    /* PyObject *fileno, *state, *args, *res; */
 
-    if (ret == DRIZZLE_RETURN_OK) {
-        return 0;
-    }else if (ret == DRIZZLE_RETURN_IO_WAIT) {
-        events = con->events;
+    /* if (ret == DRIZZLE_RETURN_OK) { */
+        /* return 0; */
+    /* }else if (ret == DRIZZLE_RETURN_IO_WAIT) { */
+        /* events = con->events; */
 
-        YDEBUG("IO_WAIT con:%p events:%d", con, events);
-        if (external_io_wait) {
-            fd = drizzle_con_fd(con);
-            if (fd == -1){
-                return -1;
-            }
+        /* YDEBUG("IO_WAIT con:%p events:%d", con, events); */
+        /* if (external_io_wait) { */
+            /* fd = drizzle_con_fd(con); */
+            /* if (fd == -1){ */
+                /* return -1; */
+            /* } */
 
-            fileno = PyLong_FromLong((long)fd);
-            if (fileno == NULL) {
-                return -1;
-            }
-            state = PyLong_FromLong((long)events);
-            if (state == NULL) {
-                Py_DECREF(fileno);
-                return -1;
-            }
+            /* fileno = PyLong_FromLong((long)fd); */
+            /* if (fileno == NULL) { */
+                /* return -1; */
+            /* } */
+            /* state = PyLong_FromLong((long)events); */
+            /* if (state == NULL) { */
+                /* Py_DECREF(fileno); */
+                /* return -1; */
+            /* } */
 
-            args = PyTuple_Pack(2, fileno, state);
-            if (args == NULL) {
-                Py_DECREF(fileno);
-                Py_DECREF(state);
-                return -1;
-            }
+            /* args = PyTuple_Pack(2, fileno, state); */
+            /* if (args == NULL) { */
+                /* Py_DECREF(fileno); */
+                /* Py_DECREF(state); */
+                /* return -1; */
+            /* } */
 
-            YDEBUG("call external_io_wait ...");
-            res = PyObject_CallObject(external_io_wait, args);
-            Py_DECREF(args);
+            /* YDEBUG("call external_io_wait ..."); */
+            /* res = PyObject_CallObject(external_io_wait, args); */
+            /* Py_DECREF(args); */
 
-            if (res == NULL) {
-                return -1;
-            }
-            Py_XDECREF(res);
-            dret = drizzle_con_set_revents(con, events);
-            if (dret != DRIZZLE_RETURN_OK){
-                RDEBUG("ret %d:%s", dret, drizzle_error(drizzle));
-                return -1;
-            }
-            return 1;
-        } else {
-            DEBUG("call drizzle_con_wait ...");
-            dret = drizzle_con_wait(drizzle);
+            /* if (res == NULL) { */
+                /* return -1; */
+            /* } */
+            /* Py_XDECREF(res); */
+            /* dret = drizzle_con_set_revents(con, events); */
+            /* if (dret != DRIZZLE_RETURN_OK){ */
+                /* RDEBUG("ret %d:%s", dret, drizzle_error(drizzle)); */
+                /* return -1; */
+            /* } */
+            /* return 1; */
+        /* } else { */
+            /* DEBUG("call drizzle_con_wait ..."); */
+            /* dret = drizzle_con_wait(drizzle); */
 
-            if (dret != DRIZZLE_RETURN_OK){
-                RDEBUG("ret %d:%s", dret, drizzle_error(drizzle));
-                return -1;
-            }
-            return 1;
-        }
-    }else{
-        RDEBUG("ret %d:%s", ret, drizzle_error(drizzle));
-        return -1;
-    }
-    return 0;
-}
+            /* if (dret != DRIZZLE_RETURN_OK){ */
+                /* RDEBUG("ret %d:%s", dret, drizzle_error(drizzle)); */
+                /* return -1; */
+            /* } */
+            /* return 1; */
+        /* } */
+    /* }else{ */
+        /* RDEBUG("ret %d:%s", ret, drizzle_error(drizzle)); */
+        /* return -1; */
+    /* } */
+    /* return 0; */
+/* } */
 
 
 static void
@@ -267,81 +267,101 @@ check_state(ClientObject *clientObj, io_state state)
     return STATE_ERROR;
 }
 
+static io_state
+check_return_type(ClientObject *clientObj, drizzle_return_t ret)
+{
+    io_state state = STATE_ERROR;
+    client_t *client = clientObj->client;
+
+    if (ret == DRIZZLE_RETURN_OK) {
+        return STATE_OK;
+    } else if (ret == DRIZZLE_RETURN_IO_WAIT) {
+        state = STATE_IO_WAIT;
+    } else {
+        //ERROR
+        RDEBUG("ret %d:%s", ret, drizzle_error(drizzle_con_drizzle(client->con)));
+        PyErr_SetString(database_error, drizzle_error(drizzle_con_drizzle(client->con)));
+        if (client->result) {
+            drizzle_result_free(client->result);
+            client->result = NULL;
+        }
+        return STATE_ERROR;
+    }
+    state = check_state(clientObj, state);
+    return state;
+}
+
 static io_state 
-return_result(client_t *client)
+return_result(ClientObject *clientObj)
 {
     drizzle_result_st *result = NULL;
     drizzle_con_st *con = NULL;
     drizzle_return_t ret = DRIZZLE_RETURN_OK;
-
+    
+    client_t *client = clientObj->client;
     con = client->con;
     result = client->result;
 
     ret = drizzle_result_write(con, result, true);
-    if (ret == DRIZZLE_RETURN_IO_WAIT) {
-        return STATE_IO_WAIT;
-    } else if (ret == DRIZZLE_RETURN_OK) {
-        drizzle_result_free(client->result);
-        client->result = NULL;
-        return STATE_OK;
-    } else {
-        //ERROR
-        RDEBUG("ret %d:%s", ret, drizzle_error(drizzle));
-        drizzle_result_free(client->result);
-        client->result = NULL;
-        return STATE_ERROR;
-    }
+    return check_return_type(clientObj, ret);
 }
 
 static io_state 
-handshake_return_result(client_t *client)
+handshake_return_result(ClientObject *clientObj)
 {
     drizzle_result_st *result = NULL;
     drizzle_con_st *con = NULL;
     drizzle_return_t ret = DRIZZLE_RETURN_OK;
+    io_state state = STATE_ERROR;
 
+    client_t *client = clientObj->client;
     con = client->con;
     
     result = drizzle_result_create(con, NULL);
     if (result == NULL) {
         RDEBUG("ret %d:%s", ret, drizzle_error(drizzle));
+        PyErr_SetString(database_error, drizzle_error(drizzle_con_drizzle(client->con)));
         return STATE_ERROR;
     }
 
     client->result = result;
     
-    return return_result(client);
-
-}
-
-static io_state 
-handshake_client_read(client_t *client)
-{
-    drizzle_con_st *con = NULL;
-    drizzle_return_t ret;
-    
-    con = client->con;
-    ret = drizzle_handshake_client_read(con);
-
-    DEBUG("handshake_read con:%p ret:%d", con, ret);
-    if (ret == DRIZZLE_RETURN_IO_WAIT) {
-        return STATE_IO_WAIT;
-    } else if (ret == DRIZZLE_RETURN_OK) {
-        return STATE_OK;
-    } else {
-        //ERROR
-        RDEBUG("ret %d:%s", ret, drizzle_error(drizzle));
-        return STATE_ERROR;
+    while (1) {
+        state = return_result(clientObj);
+        if (state != STATE_IO_WAIT) {
+            break;
+        }
     }
-    /* return STATE_OK; */
+    return state;
 }
 
 static io_state 
-handshake_server_write(client_t *client)
+handshake_client_read(ClientObject *clientObj)
 {
     drizzle_con_st *con = NULL;
     drizzle_return_t ret;
+    io_state state = STATE_ERROR;
+
+    client_t *client = clientObj->client;
+    con = client->con;
+    while (1) {
+        ret = drizzle_handshake_client_read(con);
+        state = check_return_type(clientObj, ret);
+        if (state != STATE_IO_WAIT) {
+            break;
+        }
+    }
+    return state;
+}
+
+static io_state 
+handshake_server_write(ClientObject *clientObj)
+{
+    drizzle_con_st *con = NULL;
+    drizzle_return_t ret;
+    io_state state = STATE_ERROR;
     
+    client_t *client = clientObj->client;
     con = client->con;
     drizzle_con_set_protocol_version(con, 10);
     drizzle_con_set_server_version(con, SERVER);
@@ -352,61 +372,38 @@ handshake_server_write(client_t *client)
     drizzle_con_set_charset(con, 8);
     drizzle_con_set_status(con, DRIZZLE_CON_STATUS_NONE);
     drizzle_con_set_max_packet_size(con, DRIZZLE_MAX_PACKET_SIZE);
-    
-    ret = drizzle_handshake_server_write(con);
-    DEBUG("handshake_write con:%p ret:%d", con, ret);
-    if (ret == DRIZZLE_RETURN_IO_WAIT) {
-        return STATE_IO_WAIT;
-    } else if (ret == DRIZZLE_RETURN_OK) {
-        return STATE_OK;
-    } else {
-        //ERROR
-        RDEBUG("ret %d:%s", ret, drizzle_error(drizzle));
-        return STATE_ERROR;
+
+    while (1) {
+        ret = drizzle_handshake_server_write(con);
+        DEBUG("handshake_write con:%p ret:%d", con, ret);
+        state = check_return_type(clientObj, ret);
+        if (state != STATE_IO_WAIT) {
+            break;
+        }
     }
-    /* return STATE_OK; */
+    return state;
 }
 
 static int
 handshake_client(ClientObject *clientObj)
 {
     io_state state = STATE_ERROR;
-    client_t *client = clientObj->client;
-    DEBUG("client:%p", client);
 
-    
-    while (1) {
-        state = handshake_server_write(client);
-        state = check_state(clientObj, state);
-        BDEBUG("write state:%d", state);
-        if (state == STATE_OK) {
-            break;
-        } else if (state == STATE_ERROR) {
-            return -1;
-        }
+    state = handshake_server_write(clientObj);
+    BDEBUG("write state:%d", state);
+    if (state == STATE_ERROR) {
+        return -1;
     }
 
-    while (1) { 
-        state = handshake_client_read(client);
-        state = check_state(clientObj, state);
-        BDEBUG("read state:%d", state);
-        if (state == STATE_OK) {
-            break;
-        } else if (state == STATE_ERROR) {
-            return -1;
-        }
+    state = handshake_client_read(clientObj);
+    if (state == STATE_ERROR) {
+        return -1;
     }
 
-
-    while (1) {
-        state = handshake_return_result(client);
-        state = check_state(clientObj, state);
-        BDEBUG("handshake_return_result state:%d", state);
-        if (state == STATE_OK) {
-            break;
-        } else if (state == STATE_ERROR) {
-            return -1;
-        }
+    state = handshake_return_result(clientObj);
+    BDEBUG("handshake_return_result state:%d", state);
+    if (state == STATE_ERROR) {
+        return -1;
     }
     //All OK
     return 1;
@@ -444,17 +441,7 @@ read_command(ClientObject *clientObj)
             return NULL;
         } 
         
-        if (ret == DRIZZLE_RETURN_IO_WAIT) {
-            state = STATE_IO_WAIT;
-        } else if (ret == DRIZZLE_RETURN_OK) {
-            state = STATE_OK;
-        } else {
-            //ERROR
-            RDEBUG("ret %d:%s", ret, drizzle_error(drizzle));
-            return NULL;
-        }
-        state = check_state(clientObj, state);
-        BDEBUG("command_read state:%d", state);
+        state = check_return_type(clientObj, ret);
         if (state == STATE_OK) {
             break;
         } else if (state == STATE_ERROR) {
@@ -626,6 +613,7 @@ accept_callback(picoev_loop* loop, int fd, int events, void* cb_arg)
             if (ret != DRIZZLE_RETURN_OK) {
                 //TODO Error
                 RDEBUG("drizzle_con_accept:%s\n", drizzle_error(drizzle));
+                PyErr_SetString(database_error, drizzle_error(drizzle));
                 return;
             }
             

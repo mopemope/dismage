@@ -94,6 +94,7 @@ check_return_type(ClientObject *clientObj, drizzle_return_t ret)
     } else {
         //ERROR
         RDEBUG("ret %d:%s", ret, drizzle_error(drizzle_con_drizzle(client->con)));
+        PyErr_SetString(database_error, drizzle_error(drizzle_con_drizzle(client->con)));
         drizzle_result_free(client->result);
         client->result = NULL;
         return STATE_ERROR;
@@ -194,6 +195,7 @@ set_columns_info(ClientObject *clientObj, drizzle_column_st *column, PyObject *i
     if (type == NULL || !PyInt_Check(type)) {
 #endif
         RDEBUG("error type");
+        PyErr_SetString(PyExc_TypeError, "must be int");
         return STATE_ERROR;
     }
 
@@ -204,12 +206,14 @@ set_columns_info(ClientObject *clientObj, drizzle_column_st *column, PyObject *i
     if (size == NULL || !PyInt_Check(size)) {
 #endif
         RDEBUG("error size");
+        PyErr_SetString(PyExc_TypeError, "must be int");
         return STATE_ERROR;
     }
     
     //
     if (name == NULL || !PyBytes_Check(name)) {
         RDEBUG("error name");
+        PyErr_SetString(PyExc_TypeError, "must be bytes");
         return STATE_ERROR;
     }
     
@@ -248,6 +252,7 @@ write_columns_info(ClientObject *clientObj)
     
     if (drizzle_column_create(client->result, &column) == NULL) {
         RDEBUG("ret %d:%s", ret, drizzle_error(drizzle_con_drizzle(client->con)));
+        PyErr_SetString(database_error, drizzle_error(drizzle_con_drizzle(client->con)));
         goto error;
     }
     
@@ -494,6 +499,7 @@ write_result(ClientObject *clientObj, PyObject *resObj)
     result = drizzle_result_create(client->con, NULL);
     if (result == NULL) {
         RDEBUG("ret %s", drizzle_error(drizzle_con_drizzle(client->con)));
+        PyErr_SetString(database_error, drizzle_error(drizzle_con_drizzle(client->con)));
         return NULL;
     }
 
