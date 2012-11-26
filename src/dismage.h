@@ -41,6 +41,8 @@ typedef enum{
     STATE_ERROR
 } io_state;
 
+extern PyObject *database_error;
+
 #ifdef DEVELOP
 #define DEBUG(...) \
     do { \

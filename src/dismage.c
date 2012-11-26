@@ -2,6 +2,8 @@
 #include "constants.h"
 #include "server.h"
 
+PyObject *database_error;
+
 
 static PyMethodDef dismage_methods[] = {
     {"listen", (PyCFunction)server_listen, METH_VARARGS | METH_KEYWORDS, "listen"},
@@ -45,6 +47,13 @@ init_dismage(void)
     }
 
     add_drizzle_constants(m);
+    database_error = PyErr_NewException("_dismage.DatabaseError",
+                      PyExc_IOError, NULL);
+    if (database_error == NULL) {
+        INITERROR;
+    }
+    Py_INCREF(database_error);
+    PyModule_AddObject(m, "DatabaseError", database_error);
 #ifdef PY3
     return m;
 #endif
