@@ -19,7 +19,8 @@ typedef struct {
 
 extern PyTypeObject ClientObjectType;
 
-
 PyObject* ClientObject_new(drizzle_con_st *con);
+
+int CheckClientObject(PyObject *obj);
 
 #endif

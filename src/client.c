@@ -68,6 +68,15 @@ ClientObject_new(drizzle_con_st *con)
     return (PyObject*)clientObj;
 }
 
+int
+CheckClientObject(PyObject *obj)
+{
+    if (obj->ob_type != &ClientObjectType) {
+        return 0;
+    }
+    return 1;
+}
+
 static int
 ClientObject_clear(ClientObject *self)
 {

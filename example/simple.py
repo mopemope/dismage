@@ -1,4 +1,6 @@
 from dismage import *
+from dismage import patch
+patch.patch_all()
 
 workers = []
 

@@ -21,6 +21,7 @@ static uint32_t activecnt = 0;
 static PyObject *app = NULL;
 static PyObject *watchdog = NULL;
 static PyObject *hub_switch_value = NULL;
+static ClientObject *current_client = NULL;
 
 static volatile sig_atomic_t loop_done = 0;
 static volatile sig_atomic_t catch_signal = 0;
@@ -171,26 +172,80 @@ init_drizzle(void)
     /* return 0; */
 /* } */
 
+static void
+resume_greenlet(PyObject *greenlet)
+{
+    PyObject *res = NULL;
+    PyObject *err_type, *err_val, *err_tb;
+
+    if (PyErr_Occurred()) {
+        PyErr_Fetch(&err_type, &err_val, &err_tb);
+        PyErr_Clear();
+        //set error
+        res = greenlet_throw(greenlet, err_type, err_val, err_tb);
+    } else {
+        res = greenlet_switch(greenlet, hub_switch_value, NULL);
+        if (res == NULL) {
+        //    call_error_logger();
+        }
+    }
+    Py_XDECREF(res);
+    if (greenlet_dead(greenlet)) {
+        Py_DECREF(greenlet);
+    }
+}
 
 static void
 trampoline_callback(picoev_loop* loop, int fd, int events, void* cb_arg)
+{
+    PyObject *o = NULL;
+    ClientObject *clientObj = NULL;
+
+    if (!picoev_del(loop, fd)) {
+        activecnt--;
+        DEBUG("activecnt:%d", activecnt);
+    }
+    
+    YDEBUG("call trampoline_callback fd:%d event:%d cb_arg:%p", fd, events, cb_arg);
+    o = (PyObject*)cb_arg;
+
+    if ((events & PICOEV_TIMEOUT) != 0) {
+
+        RDEBUG("** trampoline_callback timeout **");
+        PyErr_SetString(database_error, "timeout");
+    }
+    if (CheckClientObject(o)) {
+        clientObj = (ClientObject*)cb_arg;
+        current_client = clientObj;
+
+        YDEBUG("resume_app_handler");
+        resume_greenlet(clientObj->greenlet);
+    } else if (greenlet_check(o)) {
+        YDEBUG("resume_greenlet");
+        resume_greenlet(o);
+    }
+}
+
+static void
+drizzle_trampoline_callback(picoev_loop* loop, int fd, int events, void* cb_arg)
 {
 
     ClientObject *clientObj = NULL;
     client_t *client = NULL;
     PyObject *greenlet = NULL, *res = NULL;
 
-    DEBUG("trampoline_callback fd:%d", fd);
+    DEBUG("drizzle_trampoline_callback fd:%d", fd);
     if(!picoev_del(loop, fd)){
         activecnt--;
         DEBUG("activecnt:%d", activecnt);
     }
 
     clientObj = (ClientObject*)cb_arg;
+    current_client = clientObj;
     client = clientObj->client;
 
     if ((events & PICOEV_TIMEOUT) != 0) {
-        RDEBUG("** trampoline_callback timeout **");
+        RDEBUG("** drizzle_trampoline_callback timeout **");
         //TODO ERROR
     } else if ((events & PICOEV_READ) != 0) {
         drizzle_con_set_revents(client->con, POLLIN);
@@ -231,13 +286,13 @@ internal_io_wait(ClientObject *clientObj)
 
     if (events & POLLIN) {
         DEBUG("set read event fd:%d", fd);
-        ret = picoev_add(main_loop, fd, PICOEV_READ, TIMEOUT_SECS, trampoline_callback, clientObj);
+        ret = picoev_add(main_loop, fd, PICOEV_READ, TIMEOUT_SECS, drizzle_trampoline_callback, clientObj);
         if(ret == 0){
             activecnt++;
         }
     }else if (events & POLLOUT) {
         DEBUG("set write event fd:%d", fd);
-        ret = picoev_add(main_loop, fd, PICOEV_WRITE, TIMEOUT_SECS, trampoline_callback, clientObj);
+        ret = picoev_add(main_loop, fd, PICOEV_WRITE, TIMEOUT_SECS, drizzle_trampoline_callback, clientObj);
         if(ret == 0){
             activecnt++;
         }
@@ -560,6 +615,7 @@ call_disage_handler(drizzle_con_st *con)
         // ERROR
         return;
     }
+    current_client = clientObj;
 
     handler = get_disage_handler();
     args = PyTuple_Pack(1, clientObj);
@@ -769,6 +825,105 @@ server_run(PyObject *obj, PyObject *args, PyObject *kwargs)
     main_loop = NULL;
     drizzle_con_free(listen_conn);
 
+    Py_RETURN_NONE;
+}
+
+PyObject*
+server_io_trampoline(PyObject *self, PyObject *args, PyObject *kwargs)
+{
+    PyObject *current = NULL, *parent = NULL, *res = NULL;
+    ClientObject *clientObj;
+    int fd, event, timeout = 0, ret, active;
+    PyObject *read = Py_None, *write = Py_None;
+
+    static char *keywords[] = {"fileno", "read", "write", "timeout", NULL};
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "i|OOi:io_trampoline", keywords, &fd, &read, &write, &timeout)) {
+        return NULL;
+    }
+
+    if (fd < 0) {
+        PyErr_SetString(PyExc_ValueError, "fileno value out of range ");
+        return NULL;
+    }
+
+    if (timeout < 0) {
+        PyErr_SetString(PyExc_ValueError, "timeout value out of range ");
+        return NULL;
+    }
+
+    if (PyObject_IsTrue(read) && PyObject_IsTrue(write)) {
+        event = PICOEV_READWRITE;
+    } else if (PyObject_IsTrue(read)) {
+        event = PICOEV_READ;
+    } else if (PyObject_IsTrue(write)) {
+        event = PICOEV_WRITE;
+    } else {
+        event = PICOEV_TIMEOUT;
+        if (timeout <= 0) {
+            PyErr_SetString(PyExc_ValueError, "timeout value out of range ");
+            return NULL;
+        }
+    }
+    
+   
+    current = greenlet_getcurrent();
+    clientObj = (ClientObject *) current_client;
+    Py_DECREF(current);
+    if (clientObj != NULL && clientObj->greenlet == current) {
+        active = picoev_is_active(main_loop, fd);
+        ret = picoev_add(main_loop, fd, event, timeout, trampoline_callback, (void *)clientObj);
+        if ((ret == 0 && !active)) {
+            activecnt++;
+        }
+        DEBUG("call from app");
+
+        // switch to hub
+        parent = greenlet_getparent(current);
+        YDEBUG("trampoline fd:%d event:%d current:%p parent:%p cb_arg:%p", fd, event, current, parent, clientObj);
+        
+        /* Py_INCREF(hub_switch_value); */
+        res = greenlet_switch(parent, hub_switch_value, NULL);
+        return res;
+    } else {
+        DEBUG("call from greenlet");
+        parent = greenlet_getparent(current);
+        if (parent == NULL) {
+            PyErr_SetString(PyExc_IOError, "call from same greenlet");
+            return NULL;
+        }
+
+        active = picoev_is_active(main_loop, fd);
+        ret = picoev_add(main_loop, fd, event, timeout, trampoline_callback, current);
+        if ((ret == 0 && !active)) {
+            activecnt++;
+        }
+        YDEBUG("trampoline fd:%d event:%d current:%p parent:%p cb_arg:%p", fd, event, current, parent, current);
+        /* Py_INCREF(hub_switch_value); */
+        res = greenlet_switch(parent, hub_switch_value, NULL);
+        return res;
+    }
+
+}
+
+PyObject *
+server_cancel_wait(PyObject *self, PyObject *args)
+{
+    int fd;
+    if (!PyArg_ParseTuple(args, "i:cancel_wait", &fd)) {
+        return NULL;
+    }
+
+    if (fd < 0) {
+        PyErr_SetString(PyExc_ValueError, "fileno value out of range ");
+        return NULL;
+    }
+    if (picoev_is_active(main_loop, fd)) {
+        if (!picoev_del(main_loop, fd)) {
+            activecnt--;
+            DEBUG("activecnt:%d", activecnt);
+        }
+    }
     Py_RETURN_NONE;
 }
 

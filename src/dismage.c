@@ -9,6 +9,8 @@ static PyMethodDef dismage_methods[] = {
     {"listen", (PyCFunction)server_listen, METH_VARARGS | METH_KEYWORDS, "listen"},
     {"run", (PyCFunction)server_run, METH_VARARGS | METH_KEYWORDS, "run"},
     {"set_wait_callback", (PyCFunction)server_set_wait_callback, METH_VARARGS, "set_wait_callback"},
+    {"io_trampoline", (PyCFunction)server_io_trampoline, METH_VARARGS|METH_KEYWORDS, "io wait trampoline"},
+    {"cancel_wait", (PyCFunction)server_cancel_wait, METH_VARARGS, "cancel_io wait"},
     {NULL, NULL, 0, NULL}        /* Sentinel */
 };
 
