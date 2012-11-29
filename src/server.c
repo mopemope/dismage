@@ -4,10 +4,18 @@
 #include "constants.h"
 #include "client.h"
 #include "result.h"
+#include "time.h"
+#include "heapq.h"
 #include "util.h"
 
 #define ACCEPT_TIMEOUT_SECS 0
 #define TIMEOUT_SECS 300
+
+typedef struct {
+   TimerObject **q;
+   uint32_t size;
+   uint32_t max;
+} pending_queue_t;
 
 static drizzle_st *drizzle;
 
@@ -27,6 +35,8 @@ static volatile sig_atomic_t loop_done = 0;
 static volatile sig_atomic_t catch_signal = 0;
 
 static picoev_loop* main_loop = NULL; //main loop
+static heapq_t *g_timers;
+static pending_queue_t *g_pendings = NULL;
 
 static int backlog = 1024 * 4; // backlog size
 static int max_fd = 1024 * 4;  // picoev max_fd
@@ -34,6 +44,70 @@ static int max_fd = 1024 * 4;  // picoev max_fd
 static void
 kill_callback(picoev_loop* loop, int fd, int events, void* cb_arg);
 
+
+static pending_queue_t*
+init_pendings(void)
+{
+    pending_queue_t *pendings = NULL;
+
+    pendings = PyMem_Malloc(sizeof(pending_queue_t));
+    if (pendings == NULL) {
+        return NULL;
+    }
+    pendings->size = 0;
+    pendings->max= 1024;
+    pendings->q = (TimerObject**)malloc(sizeof(TimerObject*) * pendings->max);
+    if (pendings->q == NULL) {
+        PyMem_Free(pendings);
+        return NULL;
+    }
+    return pendings;
+}
+
+static int
+realloc_pendings(void)
+{
+    TimerObject **new_heap;
+    uint32_t max;
+    pending_queue_t *pendings = g_pendings;
+
+    if (pendings->size >= pendings->max) {
+        //realloc
+        max = pendings->max * 2;
+        new_heap = (TimerObject**)realloc(pendings->q, sizeof(TimerObject*) * max);
+        if (new_heap == NULL) {
+            PyErr_SetString(PyExc_Exception, "size over timer queue");
+            return -1;
+        }
+        pendings->max = max;
+        pendings->q = new_heap;
+        RDEBUG("realloc max:%d", pendings->max);
+    }
+    return 1;
+}
+
+static void
+destroy_pendings(void)
+{
+    if (g_pendings == NULL) {
+        return;
+    }
+    int i = 0; 
+    int len = g_pendings->size;
+    TimerObject *timer = NULL;
+    TimerObject **t = g_pendings->q;
+    t += i;
+
+    while(len--) {
+        timer = *t;
+        Py_DECREF(timer);
+        t++;
+    }
+
+    free(g_pendings->q);
+    PyMem_Free(g_pendings);
+    g_pendings = NULL;
+}
 
 static void
 init_main_loop(void)
@@ -757,6 +831,103 @@ server_listen(PyObject *obj, PyObject *args, PyObject *kwargs)
     Py_RETURN_NONE;
 }
 
+static inline int
+fire_pendings(void)
+{
+    int ret = 1;
+    TimerObject *timer = NULL;
+    pending_queue_t *pendings = g_pendings;
+
+    while(pendings->size && loop_done && activecnt > 0) {
+        timer =  *(pendings->q + --pendings->size);
+        DEBUG("start timer:%p activecnt:%d", timer, activecnt);
+        fire_timer(timer);
+        Py_DECREF(timer);
+        activecnt--;
+
+        DEBUG("fin timer:%p activecnt:%d", timer, activecnt);
+        if (PyErr_Occurred()) {
+            RDEBUG("pending call raise exception");
+            /* call_error_logger(); */
+            ret = -1;
+            break;
+        }
+    }
+    return ret;
+}
+
+static inline int
+fire_timers(void)
+{
+    TimerObject *timer;
+    int ret = 1;
+    heapq_t *q = g_timers;
+    time_t now = time(NULL);
+
+    while(q->size > 0 && loop_done && activecnt > 0) {
+
+        timer = q->heap[0];
+        DEBUG("seconds:%d", (int)timer->seconds);
+        DEBUG("now:%d", (int)now);
+        if (timer->seconds <= now) {
+            //call
+            timer = heappop(q);
+            fire_timer(timer);
+
+            Py_DECREF(timer);
+            activecnt--;
+            DEBUG("fin timer:%p activecnt:%d", timer, activecnt);
+
+            if (PyErr_Occurred()) {
+                RDEBUG("scheduled call raise exception");
+                /* call_error_logger(); */
+                ret = -1;
+                break;
+            }
+            /* timer = q->heap[0]; */
+        } else {
+            break;
+        }
+    }
+    return ret;
+
+}
+
+
+static PyObject*
+internal_schedule_call(int seconds, PyObject *cb, PyObject *args, PyObject *kwargs, PyObject *greenlet)
+{
+    TimerObject* timer;
+    heapq_t *timers = g_timers;
+    pending_queue_t *pendings = g_pendings;
+
+    timer = TimerObject_new(seconds, cb, args, kwargs, greenlet);
+    if (timer == NULL) {
+        return NULL;
+    }
+    DEBUG("seconds:%d", seconds);
+    if (!seconds) {
+        if (realloc_pendings() == -1) {
+            Py_DECREF(timer);
+            return NULL;
+        }
+        Py_INCREF(timer);
+
+        //timer->pending = ++pendings->size;
+        pendings->q[pendings->size] = timer;
+        pendings->size++;
+        DEBUG("add timer:%p pendings->size:%d", timer, pendings->size);
+    } else {
+        if (heappush(timers, timer) == -1) {
+            Py_DECREF(timer);
+            return NULL;
+        }
+    }
+        
+    activecnt++;
+    return (PyObject*)timer;
+}
+
 static void 
 builtin_loop(void)
 {
@@ -770,10 +941,14 @@ builtin_loop(void)
     PyOS_setsig(SIGTERM, sigint_cb);
     
     ret = picoev_add(main_loop, listen_sock, PICOEV_READ, ACCEPT_TIMEOUT_SECS, accept_callback, NULL);
+
     if(ret == 0){
         activecnt++;
     }
+
     while (likely(loop_done == 1 && activecnt > 0)) {
+        fire_pendings();
+        fire_timers();
         picoev_loop_once(main_loop, 10);
         if (watchdog) {
             watchdog_result = PyObject_CallFunction(watchdog, NULL);
@@ -798,6 +973,54 @@ run_loop(void)
     DEBUG("fin loop");
 }
 
+PyObject*
+server_schedule_call(PyObject *self, PyObject *args, PyObject *kwargs)
+{
+    long seconds = 0, ret;
+    Py_ssize_t size;
+    PyObject *sec = NULL, *cb = NULL, *cbargs = NULL, *timer;
+
+    size = PyTuple_GET_SIZE(args);
+    DEBUG("args size %d", (int)size);
+
+    if (size < 2) {
+        PyErr_SetString(PyExc_TypeError, "schedule_call takes exactly 2 argument");
+        return NULL;
+    }
+    sec = PyTuple_GET_ITEM(args, 0);
+    cb = PyTuple_GET_ITEM(args, 1);
+
+#ifdef PY3
+    if (!PyLong_Check(sec)) {
+#else
+    if (!PyInt_Check(sec)) {
+#endif
+        PyErr_SetString(PyExc_TypeError, "must be integer");
+        return NULL;
+    }
+    if (!PyCallable_Check(cb)) {
+        PyErr_SetString(PyExc_TypeError, "must be callable");
+        return NULL;
+    }
+
+    ret = PyLong_AsLong(sec);
+    if (PyErr_Occurred()) {
+        return NULL;
+    }
+    if (ret < 0) {
+        PyErr_SetString(PyExc_TypeError, "seconds value out of range");
+        return NULL;
+    }
+    seconds = ret;
+
+    if (size > 2) {
+        cbargs = PyTuple_GetSlice(args, 2, size);
+    }
+
+    timer = internal_schedule_call(seconds, cb, cbargs, kwargs, NULL);
+    Py_XDECREF(cbargs);
+    return timer;
+}
 
 PyObject*
 server_run(PyObject *obj, PyObject *args, PyObject *kwargs)
@@ -927,10 +1150,70 @@ server_cancel_wait(PyObject *self, PyObject *args)
     Py_RETURN_NONE;
 }
 
+PyObject*
+server_spawn(PyObject *self, PyObject *args, PyObject *kwargs)
+{
+    PyObject *greenlet = NULL, *res = NULL;
+    PyObject *func = NULL, *func_args = NULL, *func_kwargs = NULL;
+
+    static char *keywords[] = {"func", "args", "kwargs", NULL};
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|OO:spawn", keywords, &func, &func_args, &func_kwargs)) {
+        return NULL;
+    }
+
+    //new greenlet
+    greenlet = greenlet_new(func, NULL);
+    if (greenlet == NULL) {
+        return NULL;
+    }
+    Py_DECREF(greenlet_getparent(greenlet));
+    res = internal_schedule_call(0, func, func_args, func_kwargs, greenlet);
+    Py_XDECREF(res);
+    Py_RETURN_NONE;
+
+}
+
+PyObject*
+server_sleep(PyObject *self, PyObject *args, PyObject *kwargs)
+{
+    PyObject *current = NULL, *parent = NULL, *res = NULL;
+    int sec = 0;
+    static char *keywords[] = {"seconds", NULL};
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "i:sleep", keywords, &sec)) {
+        return NULL;
+    }
+    
+    current = greenlet_getcurrent();
+    parent = greenlet_getparent(current);
+    Py_DECREF(current);
+    if (parent == NULL) {
+        PyErr_SetString(PyExc_IOError, "call from same greenlet");
+        return NULL;
+    }
+    DEBUG("sleep sec:%d", sec);
+    res = internal_schedule_call(sec, NULL, NULL, NULL, current);
+    Py_XDECREF(res);
+    res = greenlet_switch(parent, hub_switch_value, NULL);
+    Py_XDECREF(res);
+
+    Py_RETURN_NONE;
+
+}
+
 int 
 init_server(void)
 {
     hub_switch_value = PyTuple_New(0);
+    g_timers = init_queue();
+    if (g_timers == NULL) {
+        return -1;
+    }
+    g_pendings = init_pendings();
+    if (g_pendings == NULL) {
+        return -1;
+    }
     return init_drizzle();
 
 }

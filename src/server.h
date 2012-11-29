@@ -18,4 +18,11 @@ PyObject* server_io_trampoline(PyObject *self, PyObject *args, PyObject *kwargs)
 
 PyObject* server_cancel_wait(PyObject *self, PyObject *args);
 
+PyObject* server_schedule_call(PyObject *self, PyObject *args, PyObject *kwargs);
+
+PyObject* server_spawn(PyObject *self, PyObject *args, PyObject *kwargs);
+
+PyObject* server_sleep(PyObject *self, PyObject *args, PyObject *kwargs);
+
+
 #endif
