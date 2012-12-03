@@ -15,6 +15,7 @@ def app(cmd, cmd_data, start_result):
     start_result(columns=columns)
     return [('john', 30), ('smith', 28)]
 
+set_auth("admin", "admin")
 listen(port=3307)
 run(app)
 

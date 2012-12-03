@@ -47,35 +47,35 @@ extern PyObject *database_error;
 #define DEBUG(...) \
     do { \
         /*printf("DEBUG: ");*/ \
-        printf("%-40s %-26s%4u: ", __FILE__, __func__, __LINE__); \
+        printf("%-30s %-30s%4u: ", __FILE__, __func__, __LINE__); \
         printf(__VA_ARGS__); \
         printf("\n"); \
     } while(0)
 #define RDEBUG(...) \
     do { \
         /*printf("%-22s%4u: ", __FILE__, __LINE__);*/ \
-        printf("\x1B[31m%-40s %-26s%4u: ", __FILE__, __func__, __LINE__); \
+        printf("\x1B[31m%-30s %-30s%4u: ", __FILE__, __func__, __LINE__); \
         printf(__VA_ARGS__); \
         printf("\x1B[0m\n"); \
     } while(0)
 #define GDEBUG(...) \
     do { \
         /*printf("%-22s%4u: ", __FILE__, __LINE__);*/ \
-        printf("\x1B[32m%-40s %-26s%4u: ", __FILE__, __func__, __LINE__); \
+        printf("\x1B[32m%-30s %-30s%4u: ", __FILE__, __func__, __LINE__); \
         printf(__VA_ARGS__); \
         printf("\x1B[0m\n"); \
     } while(0)
 #define BDEBUG(...) \
     do { \
         /*printf("%-22s%4u: ", __FILE__, __LINE__);*/ \
-        printf("\x1B[1;34m%-40s %-26s%4u: ", __FILE__, __func__, __LINE__); \
+        printf("\x1B[1;34m%-30s %-30s%4u: ", __FILE__, __func__, __LINE__); \
         printf(__VA_ARGS__); \
         printf("\x1B[0m\n"); \
     } while(0)
 #define YDEBUG(...) \
     do { \
         /*printf("%-22s%4u: ", __FILE__, __LINE__);*/ \
-        printf("\x1B[1;33m%-40s %-26s%4u: ", __FILE__, __func__, __LINE__); \
+        printf("\x1B[1;33m%-30s %-30s%4u: ", __FILE__, __func__, __LINE__); \
         printf(__VA_ARGS__); \
         printf("\x1B[0m\n"); \
     } while(0)

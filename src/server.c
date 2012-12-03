@@ -26,6 +26,9 @@ static char *unix_sock_name = NULL;
 
 static uint32_t activecnt = 0;
 
+static PyObject *g_user = NULL;
+static PyObject *g_password = NULL;
+
 static PyObject *app = NULL;
 static PyObject *watchdog = NULL;
 static PyObject *hub_switch_value = NULL;
@@ -44,6 +47,8 @@ static int max_fd = 1024 * 4;  // picoev max_fd
 static void
 kill_callback(picoev_loop* loop, int fd, int events, void* cb_arg);
 
+static int 
+set_auth(drizzle_con_st *con, PyObject *user, PyObject *password);
 
 static pending_queue_t*
 init_pendings(void)
@@ -475,6 +480,7 @@ handshake_client_read(ClientObject *clientObj)
     con = client->con;
     while (1) {
         ret = drizzle_handshake_client_read(con);
+        DEBUG("handshake_client_read con:%p ret:%d", con, ret);
         state = check_return_type(clientObj, ret);
         if (state != STATE_IO_WAIT) {
             break;
@@ -706,6 +712,7 @@ call_disage_handler(drizzle_con_st *con)
     Py_DECREF(greenlet_getparent(greenlet));
     clientObj->greenlet = greenlet;
 
+    DEBUG("create greenlet greenlet:%p", greenlet);
     DEBUG("start client:%p", clientObj);
     res = greenlet_switch(greenlet, args, NULL);
     Py_DECREF(args);
@@ -737,7 +744,6 @@ accept_callback(picoev_loop* loop, int fd, int events, void* cb_arg)
             
             DEBUG("accept ret:%d", ret);
             if (ret == DRIZZLE_RETURN_IO_WAIT) {
-                DEBUG("IO_WAIT?");
                 return;
             }
             if (ret != DRIZZLE_RETURN_OK) {
@@ -819,6 +825,7 @@ server_listen(PyObject *obj, PyObject *args, PyObject *kwargs)
     }
     Py_END_ALLOW_THREADS;
 
+    set_auth(conn, g_user, g_password);
     if (drizzle_con_listen(conn) != DRIZZLE_RETURN_OK) {
         PyErr_SetString(PyExc_IOError, drizzle_error(drizzle));
         drizzle_con_free(conn);
@@ -1197,6 +1204,76 @@ server_sleep(PyObject *self, PyObject *args, PyObject *kwargs)
     Py_XDECREF(res);
     res = greenlet_switch(parent, hub_switch_value, NULL);
     Py_XDECREF(res);
+
+    Py_RETURN_NONE;
+
+}
+
+static int 
+set_auth(drizzle_con_st *con, PyObject *user, PyObject *password)
+{
+    
+    PyObject *u = NULL, *p = NULL;
+    char *uc = NULL, *pc = NULL;
+
+    if (listen_conn == NULL) {
+        return 1;
+    }
+
+    if (user == NULL || password == NULL) {
+        return 1;
+    }
+
+    /* if (PyUnicode_Check(user)) { */
+        /* u = PyUnicode_AsLatin1String(user); */
+        /* uc = PyBytes_AS_STRING(u); */
+    /* }else if (PyBytes_Check(user)) { */
+        uc = PyBytes_AS_STRING(user);
+    /* } */
+
+    /* if (PyUnicode_Check(password)) { */
+        /* p = PyUnicode_AsLatin1String(password); */
+        /* pc = PyBytes_AS_STRING(p); */
+    /* }else if (PyBytes_Check(password)) { */
+        pc = PyBytes_AS_STRING(password);
+    /* } */
+    
+    drizzle_con_set_auth(con, uc, pc);
+    DEBUG("set_auth %s:%s", uc, pc);
+    
+    Py_XDECREF(u);
+    Py_XDECREF(p);
+
+    return 1;
+}
+
+PyObject*
+server_set_auth(PyObject *self, PyObject *args, PyObject *kwargs)
+{
+    PyObject *u= NULL, *p = NULL;
+
+    static char *keywords[] = {"user", "password", NULL};
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OO:set_auth", keywords, &u, &p)) {
+        return NULL;
+    }
+    
+    if (g_user != NULL) {
+        Py_DECREF(g_user);
+        g_user = NULL;
+    }
+
+    if (g_password != NULL) {
+        Py_DECREF(g_password);
+        g_password= NULL;
+    }
+    g_user = u;
+    Py_INCREF(g_user);
+
+    g_password = p;
+    Py_INCREF(g_password);
+    
+    /* set_auth(g_user, g_password); */
 
     Py_RETURN_NONE;
 

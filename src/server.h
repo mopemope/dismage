@@ -24,5 +24,6 @@ PyObject* server_spawn(PyObject *self, PyObject *args, PyObject *kwargs);
 
 PyObject* server_sleep(PyObject *self, PyObject *args, PyObject *kwargs);
 
+PyObject* server_set_auth(PyObject *self, PyObject *args, PyObject *kwargs);
 
 #endif

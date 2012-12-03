@@ -16,6 +16,8 @@ static PyMethodDef dismage_methods[] = {
     {"schedule_call", (PyCFunction)server_schedule_call, METH_VARARGS|METH_KEYWORDS, ""},
     {"spawn", (PyCFunction)server_spawn, METH_VARARGS|METH_KEYWORDS, ""},
     {"sleep", (PyCFunction)server_sleep, METH_VARARGS|METH_KEYWORDS, ""},
+    
+    {"set_auth", (PyCFunction)server_set_auth, METH_VARARGS|METH_KEYWORDS, ""},
     {NULL, NULL, 0, NULL}        /* Sentinel */
 };
 
