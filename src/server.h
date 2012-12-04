@@ -14,6 +14,8 @@ PyObject* server_listen(PyObject *obj, PyObject *args, PyObject *kwargs);
 
 PyObject* server_run(PyObject *obj, PyObject *args, PyObject *kwargs);
 
+PyObject* server_shutdown(PyObject *obj, PyObject *args, PyObject *kwargs);
+
 PyObject* server_io_trampoline(PyObject *self, PyObject *args, PyObject *kwargs);
 
 PyObject* server_cancel_wait(PyObject *self, PyObject *args);

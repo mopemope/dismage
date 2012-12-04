@@ -1279,6 +1279,21 @@ server_set_auth(PyObject *self, PyObject *args, PyObject *kwargs)
 
 }
 
+PyObject *
+server_shutdown(PyObject *self, PyObject *args, PyObject *kwds)
+{
+    int timeout = 0;
+
+    static char *kwlist[] = {"timeout", 0};
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|i:timeout",
+                                     kwlist, &timeout)) {
+        return NULL;
+    }
+    kill_server(timeout);
+    Py_RETURN_NONE;
+}
+
 int 
 init_server(void)
 {
